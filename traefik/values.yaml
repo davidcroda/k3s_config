@@ -1,0 +1,36 @@
+ingressRoute:
+  dashboard:
+    enabled: true
+    matchRule: Host(`traefik.daveroda.com`) 
+    insecure: true
+persistence:
+  enabled: true
+  name: certs
+  existingClaim: certs-pvc
+  accessMode: ReadWriteOnce
+  size: 128Mi
+  path: /certs
+certResolvers:
+  letsencrypt:
+    dnsChallenge:
+      provider: cloudflare
+    storage: /certs/acme.json
+env:
+  - name: CF_DNS_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: traefik-lets-encrypt
+        key: cloudflare-dns-api-token
+ports:
+  websecure:
+    port: 8443
+    expose: true
+    exposedPort: 443
+    protocol: TCP
+    tls:
+      enabled: true
+      certResolver: "letsencrypt"
+service:
+  type: LoadBalancer
+  spec:
+    loadBalancerIP: 192.168.50.181

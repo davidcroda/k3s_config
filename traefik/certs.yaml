@@ -1,0 +1,27 @@
+# apiVersion: v1
+# kind: PersistentVolume
+# metadata:
+#   namespace: ingress
+#   name: certs-pv
+# spec:
+#   capacity:
+#     storage: 128Mi
+#   accessModes:
+#   - ReadWriteOnce
+#   hostPath:
+#     path: /data/certs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  namespace: ingress
+  name: certs-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 128Mi 
+  claimRef:
+    name: gandolf-pvc
+    namespace: default

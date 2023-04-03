@@ -1,0 +1,61 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-config
+  namespace: nextcloud
+data:
+  backup.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    IFS=$'\n\t'
+
+    find /nextcloud/data -type d -name files \
+      | grep -E "^/nextcloud/data/[a-zA-Z0-9]+/files$" \
+      | xargs -I % rclone -v copy % b2:nextcloud-backup-daveroda/
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backblaze-backup
+spec:
+  schedule: '0 */6 * * *'
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          containers:
+            - name: rclone
+              image: davidcroda/rclone_backup
+              imagePullPolicy: Always
+              env:
+                - name: RCLONE_CONFIG_B2_TYPE
+                  value: b2
+                - name: RCLONE_CONFIG_B2_ACCOUNT
+                  valueFrom:
+                    secretKeyRef:
+                      name: backblaze-credentials
+                      key: account
+                - name: RCLONE_CONFIG_B2_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: backblaze-credentials
+                      key: secret-key
+              command:
+                - /backup.sh
+              volumeMounts:
+                - name: backup-script
+                  mountPath: /backup.sh
+                  subPath: backup.sh
+                - name: nextcloud-main
+                  mountPath: /nextcloud
+          volumes:
+            - name: backup-script
+              configMap:
+                name: backup-config
+                defaultMode: 0744
+            - name: nextcloud-main
+              persistentVolumeClaim:
+                claimName: nextcloud-nextcloud
+          restartPolicy: OnFailure

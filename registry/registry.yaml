@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: docker-repo-pv
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /data/repository
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: docker-repo-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: docker-registry-pod
+  labels:
+    app: registry
+spec:
+  containers:
+    - name: registry
+      image: registry:2.6.2
+      volumeMounts:
+        - name: repo-vol
+          mountPath: '/var/lib/registry'
+        - name: auth-vol
+          mountPath: '/auth'
+          readOnly: true
+      env:
+        - name: REGISTRY_AUTH
+          value: 'htpasswd'
+        - name: REGISTRY_AUTH_HTPASSWD_REALM
+          value: 'Registry Realm'
+        - name: REGISTRY_AUTH_HTPASSWD_PATH
+          value: '/auth/htpasswd'
+        - name: REGISTRY_HTTP_ADDR
+          value: 'localhost:5000'
+        - name: REGISTRY_HTTP_HOST
+          value: 'https://registry.daveroda.com:443'
+  volumes:
+    - name: repo-vol
+      persistentVolumeClaim:
+        claimName: docker-repo-pvc
+    - name: auth-vol
+      secret:
+        secretName: auth-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: docker-registry
+spec:
+  selector:
+    app: registry
+  ports:
+    - port: 80
+      targetPort: 5000
+  type: LoadBalancer
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: docker-registry
+  namespace: container-registry
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`registry.daveroda.com`)
+      services:
+        - kind: Service
+          name: docker-registry
+          port: 80

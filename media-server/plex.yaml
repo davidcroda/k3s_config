@@ -1,0 +1,766 @@
+---
+apiVersion: v1
+data:
+  ServerConfig.json: |
+    {
+      "BasePathOverride": "/jackett"
+    }
+  init-jackett.sh: |
+    #!/bin/bash
+    echo "### Initializing config ###"
+    if [ ! -f /jackett-config/ServerConfig.json ]; then
+      cp -n /init-jackett/ServerConfig.json /jackett-config/ServerConfig.json
+      echo "### No configuration found, intialized with default settings ###"
+    fi
+kind: ConfigMap
+metadata:
+  name: init-jackett-cm
+  namespace: plex
+---
+apiVersion: v1
+data:
+  config.xml: |
+    <Config>
+      <UrlBase>/prowlarr</UrlBase>
+    </Config>
+  init-prowlarr.sh: |
+    #!/bin/bash
+    echo "### Initializing config ###"
+    if [ ! -f /prowlarr-config/config.xml ]; then
+      cp -n /init-prowlarr/config.xml /prowlarr-config/config.xml
+      echo "### No configuration found, intialized with default settings ###"
+    fi
+kind: ConfigMap
+metadata:
+  name: init-prowlarr-cm
+  namespace: plex
+---
+apiVersion: v1
+data:
+  config.xml: |
+    <Config>
+      <UrlBase>/radarr</UrlBase>
+    </Config>
+  init-radarr.sh: |
+    #!/bin/bash
+    echo "### Initializing config ###"
+    if [ ! -f /radarr-config/config.xml ]; then
+      cp -n /init-radarr/config.xml /radarr-config/config.xml
+      echo "### No configuration found, intialized with default settings ###"
+    fi
+    mkdir -p /data/media/movies
+kind: ConfigMap
+metadata:
+  name: init-radarr-cm
+  namespace: plex
+---
+apiVersion: v1
+data:
+  config.xml: |
+    <Config>
+      <UrlBase>/sonarr</UrlBase>
+    </Config>
+  init-sonarr.sh: |
+    #!/bin/bash
+    echo "### Initializing config ###"
+    if [ ! -f /sonarr-config/config.xml ]; then
+      cp -n /init-sonarr/config.xml /sonarr-config/config.xml
+      echo "### No configuration found, intialized with default settings ###"
+    fi
+    mkdir -p /data/media/tv
+kind: ConfigMap
+metadata:
+  name: init-sonarr-cm
+  namespace: plex
+---
+apiVersion: v1
+data:
+  PGID: '1000'
+  PUID: '1000'
+kind: ConfigMap
+metadata:
+  name: jackett-config
+  namespace: plex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jackett
+  namespace: plex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: release-name
+      app.kubernetes.io/name: k8s-mediaserver
+  template:
+    metadata:
+      labels:
+        app: jackett
+        app.kubernetes.io/instance: release-name
+        app.kubernetes.io/name: k8s-mediaserver
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: jackett-config
+          image: docker.io/linuxserver/jackett:latest
+          imagePullPolicy: Always
+          name: k8s-mediaserver
+          ports:
+            - containerPort: 9117
+              name: jackett-port
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /config
+              name: mediaserver-volume
+              subPath: config/jackett
+      initContainers:
+        - command:
+            - /init-jackett/init-jackett.sh
+          image: docker.io/ubuntu:groovy
+          imagePullPolicy: IfNotPresent
+          name: config-jackett
+          securityContext:
+            runAsGroup: 1000
+            runAsUser: 1000
+          volumeMounts:
+            - mountPath: /init-jackett
+              name: init-files-jackett
+            - mountPath: /jackett-config
+              name: mediaserver-volume
+              subPath: config/jackett/Jackett
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: mediaserver-volume
+          persistentVolumeClaim:
+            claimName: mediaserver-pvc
+        - configMap:
+            defaultMode: 493
+            name: init-jackett-cm
+          name: init-files-jackett
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jackett
+  namespace: plex
+spec:
+  rules:
+    - host: mediaserver.local.daveroda.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: jackett
+                port:
+                  number: 9117
+            path: /jackett
+            pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jackett
+  namespace: plex
+spec:
+  ports:
+    - name: jackett-port
+      port: 9117
+      protocol: TCP
+      targetPort: 9117
+  selector:
+    app: jackett
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: organizr
+  namespace: plex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: organizr
+  template:
+    metadata:
+      labels:
+        app: organizr
+    spec:
+      containers:
+        - image: organizr/organizr
+          imagePullPolicy: Always
+          name: organizr
+          env:
+            - name: PGID
+              value: '1000'
+            - name: PUID
+              value: '1000'
+          ports:
+            - containerPort: 80
+              name: organizr-port
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /config
+              name: mediaserver-volume
+              subPath: config/organizr
+      volumes:
+        - name: mediaserver-volume
+          persistentVolumeClaim:
+            claimName: mediaserver-pvc
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: organizr
+  namespace: plex
+spec:
+  rules:
+    - host: mediaserver.local.daveroda.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: organizr
+                port:
+                  number: 80
+            path: /
+            pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: organizr
+  namespace: plex
+spec:
+  ports:
+    - name: organizr-port
+      port: 80
+      protocol: TCP
+      targetPort: 80
+  selector:
+    app: organizr
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: rancher.io/local-path
+    volume.kubernetes.io/selected-node: gandolf
+    volume.kubernetes.io/storage-provisioner: rancher.io/local-path
+  name: mediaserver-pvc
+  namespace: plex
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: local-path
+---
+apiVersion: v1
+data:
+  PGID: '1000'
+  PLEX_CLAIM: claim-FJiaFC1x_QQ1DojjAGPu
+  PUID: '1000'
+  VERSION: latest
+kind: ConfigMap
+metadata:
+  annotations: {}
+  name: plex-config
+  namespace: plex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plex
+  namespace: plex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: release-name
+      app.kubernetes.io/name: k8s-mediaserver
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: plex
+        app.kubernetes.io/instance: release-name
+        app.kubernetes.io/name: k8s-mediaserver
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: plex-config
+          image: docker.io/linuxserver/plex:latest
+          imagePullPolicy: Always
+          name: k8s-mediaserver
+          ports:
+            - containerPort: 32400
+              name: plex-port
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /config
+              name: mediaserver-volume
+              subPath: config/plex
+            - mountPath: /data
+              name: mediaserver-volume
+      volumes:
+        - name: mediaserver-volume
+          persistentVolumeClaim:
+            claimName: mediaserver-pvc
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: plex
+  namespace: plex
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: plex.local.daveroda.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: plex
+                port:
+                  number: 32400
+            path: /
+            pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations: {}
+  name: plex
+  namespace: plex
+spec:
+  ports:
+    - name: plex-port
+      port: 32400
+      protocol: TCP
+      targetPort: 32400
+  selector:
+    app: plex
+  type: ClusterIP
+---
+apiVersion: v1
+data:
+  PGID: '1000'
+  PUID: '1000'
+kind: ConfigMap
+metadata:
+  annotations: {}
+  name: prowlarr-config
+  namespace: plex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations: {}
+  name: prowlarr
+  namespace: plex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: release-name
+      app.kubernetes.io/name: k8s-mediaserver
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: prowlarr
+        app.kubernetes.io/instance: release-name
+        app.kubernetes.io/name: k8s-mediaserver
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: prowlarr-config
+          image: docker.io/linuxserver/prowlarr:develop
+          imagePullPolicy: Always
+          name: k8s-mediaserver
+          ports:
+            - containerPort: 9696
+              name: prowlarr-port
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /config
+              name: mediaserver-volume
+              subPath: config/prowlarr
+      initContainers:
+        - command:
+            - /init-prowlarr/init-prowlarr.sh
+          image: docker.io/ubuntu:groovy
+          imagePullPolicy: IfNotPresent
+          name: config-prowlarr
+          resources: {}
+          securityContext:
+            runAsGroup: 1000
+            runAsUser: 1000
+          volumeMounts:
+            - mountPath: /init-prowlarr
+              name: init-files-prowlarr
+            - mountPath: /prowlarr-config
+              name: mediaserver-volume
+              subPath: config/prowlarr
+      volumes:
+        - name: mediaserver-volume
+          persistentVolumeClaim:
+            claimName: mediaserver-pvc
+        - configMap:
+            defaultMode: 493
+            name: init-prowlarr-cm
+          name: init-files-prowlarr
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations: {}
+  name: prowlarr
+  namespace: plex
+spec:
+  rules:
+    - host: mediaserver.local.daveroda.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: prowlarr
+                port:
+                  number: 9696
+            path: /prowlarr
+            pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations: {}
+  name: prowlarr
+  namespace: plex
+spec:
+  ports:
+    - name: prowlarr-port
+      port: 9696
+      protocol: TCP
+      targetPort: 9696
+  selector:
+    app: prowlarr
+  type: ClusterIP
+---
+apiVersion: v1
+data:
+  PGID: '1000'
+  PUID: '1000'
+kind: ConfigMap
+metadata:
+  annotations: {}
+  name: radarr-config
+  namespace: plex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: radarr
+  namespace: plex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: release-name
+      app.kubernetes.io/name: k8s-mediaserver
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: radarr
+        app.kubernetes.io/instance: release-name
+        app.kubernetes.io/name: k8s-mediaserver
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: radarr-config
+          image: docker.io/linuxserver/radarr:latest
+          imagePullPolicy: Always
+          name: k8s-mediaserver
+          ports:
+            - containerPort: 7878
+              name: radarr-port
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /config
+              name: mediaserver-volume
+              subPath: config/radarr
+            - mountPath: /data
+              name: mediaserver-volume
+      initContainers:
+        - command:
+            - /init-radarr/init-radarr.sh
+          image: docker.io/ubuntu:groovy
+          imagePullPolicy: IfNotPresent
+          name: config-radarr
+          resources: {}
+          securityContext:
+            runAsGroup: 1000
+            runAsUser: 1000
+          volumeMounts:
+            - mountPath: /init-radarr
+              name: init-files-radarr
+            - mountPath: /radarr-config
+              name: mediaserver-volume
+              subPath: config/radarr
+            - mountPath: /data
+              name: mediaserver-volume
+      volumes:
+        - name: mediaserver-volume
+          persistentVolumeClaim:
+            claimName: mediaserver-pvc
+        - configMap:
+            defaultMode: 493
+            name: init-radarr-cm
+          name: init-files-radarr
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: radarr
+  namespace: plex
+spec:
+  rules:
+    - host: mediaserver.local.daveroda.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: radarr
+                port:
+                  number: 7878
+            path: /radarr
+            pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: radarr
+  namespace: plex
+spec:
+  ports:
+    - name: radarr-port
+      port: 7878
+      protocol: TCP
+      targetPort: 7878
+  selector:
+    app: radarr
+  type: ClusterIP
+---
+apiVersion: v1
+data:
+  PGID: '1000'
+  PUID: '1000'
+kind: ConfigMap
+metadata:
+  name: sonarr-config
+  namespace: plex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarr
+  namespace: plex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: release-name
+      app.kubernetes.io/name: k8s-mediaserver
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: sonarr
+        app.kubernetes.io/instance: release-name
+        app.kubernetes.io/name: k8s-mediaserver
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: sonarr-config
+          image: docker.io/linuxserver/sonarr:latest
+          imagePullPolicy: Always
+          name: k8s-mediaserver
+          ports:
+            - containerPort: 8989
+              name: sonarr-port
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /config
+              name: mediaserver-volume
+              subPath: config/sonarr
+            - mountPath: /data
+              name: mediaserver-volume
+      dnsPolicy: ClusterFirst
+      initContainers:
+        - command:
+            - /init-sonarr/init-sonarr.sh
+          image: docker.io/ubuntu:groovy
+          imagePullPolicy: IfNotPresent
+          name: config-sonarr
+          resources: {}
+          securityContext:
+            runAsGroup: 1000
+            runAsUser: 1000
+          volumeMounts:
+            - mountPath: /init-sonarr
+              name: init-files-sonarr
+            - mountPath: /sonarr-config
+              name: mediaserver-volume
+              subPath: config/sonarr
+            - mountPath: /data
+              name: mediaserver-volume
+      volumes:
+        - name: mediaserver-volume
+          persistentVolumeClaim:
+            claimName: mediaserver-pvc
+        - configMap:
+            defaultMode: 493
+            name: init-sonarr-cm
+          name: init-files-sonarr
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sonarr
+  namespace: plex
+spec:
+  rules:
+    - host: mediaserver.local.daveroda.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: sonarr
+                port:
+                  number: 8989
+            path: /sonarr
+            pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarr
+  namespace: plex
+spec:
+  ports:
+    - name: sonarr-port
+      port: 8989
+      protocol: TCP
+      targetPort: 8989
+  selector:
+    app: sonarr
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: v1
+data:
+  LOCAL_NETWORK: 192.168.50.0/24
+  OPENVPN_CONFIG: ca_montreal
+  OPENVPN_PROVIDER: PIA
+  PGID: '1000'
+  PUID: '1000'
+  TRANSMISSION_DOWNLOAD_DIR: /data/downloads/completed
+  TRANSMISSION_INCOMPLETE_DIR: /data/downloads/incomplete
+  TRANSMISSION_WEB_UI: combustion
+kind: ConfigMap
+metadata:
+  annotations: {}
+  name: transmission-config
+  namespace: plex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transmission
+  namespace: plex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transmission
+  template:
+    metadata:
+      labels:
+        app: transmission
+    spec:
+      containers:
+        - envFrom:
+            - configMapRef:
+                name: transmission-config
+            - secretRef:
+                name: vpn-secrets
+          image: haugene/transmission-openvpn
+          imagePullPolicy: Always
+          name: k8s-mediaserver
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+            privileged: true
+          volumeMounts:
+            - mountPath: /config
+              name: mediaserver-volume
+            - mountPath: /data
+              name: mediaserver-volume
+      volumes:
+        - name: mediaserver-volume
+          persistentVolumeClaim:
+            claimName: mediaserver-pvc
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: transmission
+  namespace: plex
+spec:
+  rules:
+    - host: mediaserver.local.daveroda.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: transmission
+                port:
+                  number: 9091
+            path: /transmission
+            pathType: Prefix
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transmission
+  namespace: plex
+spec:
+  ports:
+    - name: trans-webui
+      port: 9091
+      protocol: TCP
+      targetPort: 9091
+  selector:
+    app: transmission
+  sessionAffinity: None
+  type: ClusterIP
