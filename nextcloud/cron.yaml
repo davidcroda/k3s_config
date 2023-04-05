@@ -11,8 +11,8 @@ data:
     IFS=$'\n\t'
 
     find /nextcloud/data -type d -name files \
-      | grep -E "^/nextcloud/data/[a-zA-Z0-9]+/files$" \
-      | xargs -I % rclone -v copy % b2:nextcloud-backup-daveroda/
+      | grep -E "^/nextcloud/data/[a-zA-Z0-9\-]+/files$" \
+      | xargs -I % rclone -v copy % b2:nextcloud-backup-daveroda%
 ---
 apiVersion: batch/v1
 kind: CronJob
